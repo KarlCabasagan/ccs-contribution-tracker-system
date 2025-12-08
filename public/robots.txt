@@ -1,0 +1,19 @@
+# robots.txt for CCS Contribution Tracker
+# https://ccs-cts.netlify.app/
+
+# Allow all crawlers
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://ccs-cts.netlify.app/sitemap.xml
+
+# Disallow admin/auth pages from indexing (they require login)
+Disallow: /reset-password
+Disallow: /pending-verification
+Disallow: /suspended
+
+# Allow main pages
+Allow: /login
+Allow: /register
+Allow: /forgot-password

@@ -2,28 +2,164 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon-light.png" id="favicon" />
-    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Primary Meta Tags -->
+    <title>
+      CCS Contribution Tracker | Student Contribution Management System
+    </title>
+    <meta
+      name="title"
+      content="CCS Contribution Tracker | Student Contribution Management System"
+    />
+    <meta
+      name="description"
+      content="Modern, real-time student contribution tracking system for the College of Computer Studies. Manage payments, generate reports, and track student contributions efficiently."
+    />
+    <meta
+      name="keywords"
+      content="CCS, contribution tracker, student management, payment tracking, college of computer studies, student contributions, university fees, tuition tracker, student finance, education management"
+    />
+    <meta name="author" content="College of Computer Studies" />
+    <meta name="robots" content="index, follow" />
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://ccs-cts.netlify.app/" />
+
+    <!-- Favicon & App Icons -->
+    <link rel="icon" type="image/png" href="/favicon-light.png" id="favicon" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon-light.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Theme Color -->
     <meta name="theme-color" content="#6366f1" />
+    <meta name="msapplication-TileColor" content="#6366f1" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ccs-cts.netlify.app/" />
+    <meta
+      property="og:title"
+      content="CCS Contribution Tracker | Student Contribution Management System"
+    />
+    <meta
+      property="og:description"
+      content="Modern, real-time student contribution tracking system for the College of Computer Studies. Manage payments, generate reports, and track student contributions efficiently."
+    />
+    <meta
+      property="og:image"
+      content="https://ccs-cts.netlify.app/favicon-dark.png"
+    />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:site_name" content="CCS Contribution Tracker" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://ccs-cts.netlify.app/" />
+    <meta
+      name="twitter:title"
+      content="CCS Contribution Tracker | Student Contribution Management System"
+    />
+    <meta
+      name="twitter:description"
+      content="Modern, real-time student contribution tracking system for the College of Computer Studies. Manage payments, generate reports, and track student contributions efficiently."
+    />
+    <meta
+      name="twitter:image"
+      content="https://ccs-cts.netlify.app/favicon-dark.png"
+    />
+
+    <!-- Apple Mobile Web App -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
     <meta name="apple-mobile-web-app-title" content="CCS Tracker" />
-    <link rel="apple-touch-icon" href="/favicon-light.png" />
-    <meta
-      name="description"
-      content="CCS Contribution Tracker - Manage and track student contributions for the College of Computer Studies"
-    />
-    <title>CCS Contribution Tracker</title>
+
+    <!-- Microsoft Tiles -->
+    <meta name="msapplication-TileImage" content="/favicon-dark.png" />
+
+    <!-- Preconnect to external domains for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Structured Data (JSON-LD) for Rich Snippets -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "CCS Contribution Tracker",
+        "alternateName": "CCS Tracker",
+        "url": "https://ccs-cts.netlify.app/",
+        "description": "Modern, real-time student contribution tracking system for the College of Computer Studies. Manage payments, generate reports, and track student contributions efficiently.",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web Browser",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "PHP"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "College of Computer Studies"
+        },
+        "featureList": [
+          "Student Contribution Tracking",
+          "Real-time Dashboard",
+          "Payment Management",
+          "Report Generation",
+          "PDF/Excel Export",
+          "User Role Management",
+          "Semester Management",
+          "Student Import via CSV"
+        ],
+        "screenshot": "https://ccs-cts.netlify.app/favicon-dark.png",
+        "softwareVersion": "1.0.0"
+      }
+    </script>
+
+    <!-- Educational Organization Schema -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "EducationalOrganization",
+        "name": "College of Computer Studies",
+        "alternateName": "CCS",
+        "url": "https://ccs-cts.netlify.app/",
+        "description": "Student contribution management system for CCS"
+      }
+    </script>
   </head>
   <body>
+    <!-- Noscript fallback for SEO -->
+    <noscript>
+      <div style="padding: 20px; text-align: center; font-family: sans-serif">
+        <h1>CCS Contribution Tracker</h1>
+        <p>
+          A modern student contribution management system for the College of
+          Computer Studies.
+        </p>
+        <p>Please enable JavaScript to use this application.</p>
+        <ul style="text-align: left; max-width: 400px; margin: 20px auto">
+          <li>Track student contributions in real-time</li>
+          <li>Generate PDF and Excel reports</li>
+          <li>Manage multiple semesters</li>
+          <li>Role-based access control</li>
+          <li>Import students via CSV</li>
+        </ul>
+      </div>
+    </noscript>
+
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Service Worker Registration -->
     <script>
-      // Register service worker for PWA
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker
