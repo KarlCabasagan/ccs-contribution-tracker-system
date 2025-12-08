@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { LoginForm } from "./components/auth/LoginForm";
 import { RegisterForm } from "./components/auth/RegisterForm";
+import { ForgotPassword } from "./components/auth/ForgotPassword";
+import { ResetPassword } from "./components/auth/ResetPassword";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { PendingVerification } from "./components/auth/PendingVerification";
 import { Suspended } from "./components/auth/Suspended";
@@ -17,6 +20,39 @@ import { SemesterManager } from "./components/semesters/SemesterManager";
 import { Reports } from "./components/reports/Reports";
 import { Settings } from "./components/settings/Settings";
 import { UserManagement } from "./components/users/UserManagement";
+
+// Dynamic favicon based on dark mode
+function FaviconManager() {
+  useEffect(() => {
+    const updateFavicon = () => {
+      const isDark = document.documentElement.classList.contains("dark");
+      const favicon = document.getElementById("favicon");
+      if (favicon) {
+        favicon.href = isDark ? "/favicon-dark.png" : "/favicon-light.png";
+      }
+    };
+
+    // Set initial favicon based on localStorage (for immediate load)
+    const storedDarkMode = localStorage.getItem("darkMode") === "true";
+    const favicon = document.getElementById("favicon");
+    if (favicon) {
+      favicon.href = storedDarkMode
+        ? "/favicon-dark.png"
+        : "/favicon-light.png";
+    }
+
+    // Watch for theme changes
+    const observer = new MutationObserver(updateFavicon);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  return null;
+}
 
 function DashboardRedirect() {
   const { isSuperAdmin } = useAuth();
@@ -45,11 +81,14 @@ function AuthStatusRoute({ children }) {
 function App() {
   return (
     <BrowserRouter>
+      <FaviconManager />
       <AuthProvider>
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<LoginForm />} />
           <Route path="/register" element={<RegisterForm />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Auth Status Routes (no Layout, just auth check) */}
           <Route
