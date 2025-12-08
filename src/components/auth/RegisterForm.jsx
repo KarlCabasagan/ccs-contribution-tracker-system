@@ -115,12 +115,16 @@ export function RegisterForm() {
               autoComplete="new-password"
             />
 
-            <div className="text-xs text-slate-500 dark:text-slate-400">
+            {/* <div className="text-xs text-slate-500 dark:text-slate-400">
               💡 The first user to register will automatically become the Super
               Admin
-            </div>
+            </div> */}
 
-            <Button type="submit" loading={loading} className="w-full">
+            <Button
+              type="submit"
+              loading={loading}
+              className="w-full flex justify-center items-center"
+            >
               Create Account
             </Button>
           </form>

@@ -122,7 +122,11 @@ export function ForgotPassword() {
                 />
               </div>
 
-              <Button type="submit" loading={loading} className="w-full">
+              <Button
+                type="submit"
+                loading={loading}
+                className="w-full flex justify-center items-center"
+              >
                 Send Reset Link
               </Button>
 

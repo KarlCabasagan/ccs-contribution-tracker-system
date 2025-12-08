@@ -177,7 +177,11 @@ export function ResetPassword() {
                 </div>
               </div>
 
-              <Button type="submit" loading={loading} className="w-full">
+              <Button
+                type="submit"
+                loading={loading}
+                className="w-full flex justify-center items-center"
+              >
                 <Lock className="w-4 h-4 mr-2" />
                 Reset Password
               </Button>

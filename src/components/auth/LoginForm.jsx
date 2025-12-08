@@ -107,7 +107,11 @@ export function LoginForm() {
               </Link>
             </div>
 
-            <Button type="submit" loading={loading} className="w-full">
+            <Button
+              type="submit"
+              loading={loading}
+              className="w-full flex justify-center items-center"
+            >
               Sign In
             </Button>
           </form>
