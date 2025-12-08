@@ -28,7 +28,7 @@ export function StudentList() {
   const [searching, setSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCollege, setSelectedCollege] = useState("");
-  const [selectedDepartment, setSelectedDepartment] = useState("");
+  const [selectedPaymentStatus, setSelectedPaymentStatus] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedMajor, setSelectedMajor] = useState("");
   const [colleges, setColleges] = useState([]);
@@ -248,9 +248,6 @@ export function StudentList() {
       if (selectedCollege) {
         dbQuery = dbQuery.eq("college_id", selectedCollege);
       }
-      if (selectedDepartment) {
-        dbQuery = dbQuery.eq("department", selectedDepartment);
-      }
       if (selectedYear) {
         dbQuery = dbQuery.eq("year_level", selectedYear);
       }
@@ -429,15 +426,7 @@ export function StudentList() {
     }
   }
 
-  // Get unique departments, years, and majors
-  const departments = useMemo(() => {
-    const depts = students
-      .map((s) => s.department)
-      .filter(Boolean)
-      .filter((v, i, a) => a.indexOf(v) === i);
-    return depts.sort();
-  }, [students]);
-
+  // Get unique years and majors
   const years = useMemo(() => {
     const yrs = students
       .map((s) => s.year_level)
@@ -454,10 +443,17 @@ export function StudentList() {
     return maj.sort();
   }, [students]);
 
-  // Filtered students - now just returns students since filtering is server-side
+  // Filtered students - apply payment status filter (client-side since it's calculated)
   const filteredStudents = useMemo(() => {
-    return students;
-  }, [students]);
+    if (!selectedPaymentStatus) return students;
+
+    return students.filter((student) => {
+      if (selectedPaymentStatus === "paid") return student.isPaid;
+      if (selectedPaymentStatus === "partial") return student.isPartial;
+      if (selectedPaymentStatus === "unpaid") return student.isUnpaid;
+      return true;
+    });
+  }, [students, selectedPaymentStatus]);
 
   // Debounced server-side search effect
   useEffect(() => {
@@ -470,13 +466,7 @@ export function StudentList() {
     if (!currentSemesterId) return;
 
     // If there's a search query or filter, use server-side search
-    if (
-      searchQuery ||
-      selectedCollege ||
-      selectedDepartment ||
-      selectedYear ||
-      selectedMajor
-    ) {
+    if (searchQuery || selectedCollege || selectedYear || selectedMajor) {
       debouncedSearchRef.current = setTimeout(() => {
         searchStudentsFromDB(searchQuery);
       }, 300);
@@ -496,7 +486,6 @@ export function StudentList() {
   }, [
     searchQuery,
     selectedCollege,
-    selectedDepartment,
     selectedYear,
     selectedMajor,
     currentSemesterId,
@@ -576,7 +565,7 @@ export function StudentList() {
   const hasActiveFilters =
     searchQuery ||
     selectedCollege ||
-    selectedDepartment ||
+    selectedPaymentStatus ||
     selectedYear ||
     selectedMajor;
 
@@ -656,19 +645,6 @@ export function StudentList() {
           </select>
 
           <select
-            value={selectedDepartment}
-            onChange={(e) => setSelectedDepartment(e.target.value)}
-            className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <option value="">All Departments</option>
-            {departments.map((dept) => (
-              <option key={dept} value={dept}>
-                {dept}
-              </option>
-            ))}
-          </select>
-
-          <select
             value={selectedYear}
             onChange={(e) => setSelectedYear(e.target.value)}
             className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -679,6 +655,17 @@ export function StudentList() {
                 Year {year}
               </option>
             ))}
+          </select>
+
+          <select
+            value={selectedPaymentStatus}
+            onChange={(e) => setSelectedPaymentStatus(e.target.value)}
+            className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Status</option>
+            <option value="paid">✓ Paid</option>
+            <option value="partial">◐ Partial</option>
+            <option value="unpaid">✗ Unpaid</option>
           </select>
         </div>
       </Card>
