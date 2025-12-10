@@ -32,6 +32,8 @@ export function StudentList() {
   const [selectedYear, setSelectedYear] = useState("");
   const [selectedMajor, setSelectedMajor] = useState("");
   const [colleges, setColleges] = useState([]);
+  const [allYears, setAllYears] = useState([]);
+  const [allMajors, setAllMajors] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [semesterName, setSemesterName] = useState("");
@@ -213,6 +215,32 @@ export function StudentList() {
     setColleges(data || []);
   }
 
+  // Fetch all available filter options for the current semester
+  async function fetchFilterOptions(semesterId) {
+    if (!semesterId) return;
+
+    try {
+      const { data } = await supabase
+        .from("students")
+        .select("year_level, major, semester_enrollments!inner(semester_id)")
+        .eq("semester_enrollments.semester_id", semesterId);
+
+      if (data) {
+        const uniqueYears = [
+          ...new Set(data.map((s) => s.year_level).filter(Boolean)),
+        ].sort();
+        const uniqueMajors = [
+          ...new Set(data.map((s) => s.major).filter(Boolean)),
+        ].sort();
+
+        setAllYears(uniqueYears);
+        setAllMajors(uniqueMajors);
+      }
+    } catch (error) {
+      console.error("Error fetching filter options:", error);
+    }
+  }
+
   // Server-side search function
   async function searchStudentsFromDB(query) {
     if (!currentSemesterId) return;
@@ -343,6 +371,11 @@ export function StudentList() {
 
       setCurrentSemesterId(targetSemesterId);
 
+      // Fetch filter options for this semester
+      if (targetSemesterId) {
+        fetchFilterOptions(targetSemesterId);
+      }
+
       if (!targetSemesterId) {
         setStudents([]);
         setTotalCount(0);
@@ -426,22 +459,9 @@ export function StudentList() {
     }
   }
 
-  // Get unique years and majors
-  const years = useMemo(() => {
-    const yrs = students
-      .map((s) => s.year_level)
-      .filter(Boolean)
-      .filter((v, i, a) => a.indexOf(v) === i);
-    return yrs.sort();
-  }, [students]);
-
-  const majors = useMemo(() => {
-    const maj = students
-      .map((s) => s.major)
-      .filter(Boolean)
-      .filter((v, i, a) => a.indexOf(v) === i);
-    return maj.sort();
-  }, [students]);
+  // Get unique years and majors - REMOVED derived useMemo hooks
+  // const years = useMemo(...)
+  // const majors = useMemo(...)
 
   // Filtered students - apply payment status filter (client-side since it's calculated)
   const filteredStudents = useMemo(() => {
@@ -637,7 +657,7 @@ export function StudentList() {
             className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Majors</option>
-            {majors.map((major) => (
+            {allMajors.map((major) => (
               <option key={major} value={major}>
                 {major}
               </option>
@@ -650,7 +670,7 @@ export function StudentList() {
             className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">All Years</option>
-            {years.map((year) => (
+            {allYears.map((year) => (
               <option key={year} value={year}>
                 Year {year}
               </option>
