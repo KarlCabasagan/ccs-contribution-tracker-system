@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
@@ -6,6 +6,7 @@ import { formatCurrency, formatDate } from "../../lib/utils";
 import {
   exportData,
   exportCollectionSummary,
+  exportVisualCollectionSummary,
   formatExportCurrency,
 } from "../../lib/exportUtils";
 import {
@@ -163,6 +164,10 @@ export function Reports() {
 
   // Export dropdown visibility
   const [exportDropdown, setExportDropdown] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Ref for collection summary snapshot
+  const collectionSummaryRef = useRef(null);
 
   useEffect(() => {
     fetchSemesters();
@@ -508,6 +513,89 @@ export function Reports() {
     };
   }, [metrics]);
 
+  // Per-major metrics for visual export
+  const majorMetrics = useMemo(() => {
+    const allStudents = [
+      ...metrics.paidStudents,
+      ...metrics.partialStudents,
+      ...metrics.unpaidStudents,
+    ];
+    const majors = [
+      ...new Set(allStudents.map((s) => s.major).filter(Boolean)),
+    ].sort();
+    const yearLevels = ["1", "2", "3", "4"];
+
+    // Compute metrics per major with year level breakdown and collection amounts
+    const perMajor = {};
+    majors.forEach((major) => {
+      const majorStudents = allStudents.filter((s) => s.major === major);
+      const totalCollected = majorStudents.reduce(
+        (sum, s) => sum + (s.totalPaid || 0),
+        0
+      );
+      const expectedCollection = majorStudents.length * contributionAmount;
+
+      const yearLevelData = yearLevels.map((yl) => {
+        const ylStudents = majorStudents.filter((s) => s.year_level === yl);
+        const ylCollected = ylStudents.reduce(
+          (sum, s) => sum + (s.totalPaid || 0),
+          0
+        );
+        return {
+          yearLevel: yl,
+          paid: ylStudents.filter((s) => s.totalPaid >= contributionAmount)
+            .length,
+          partial: ylStudents.filter(
+            (s) => s.totalPaid > 0 && s.totalPaid < contributionAmount
+          ).length,
+          unpaid: ylStudents.filter((s) => s.totalPaid === 0).length,
+          total: ylStudents.length,
+          collected: ylCollected,
+        };
+      });
+
+      perMajor[major] = {
+        yearLevelData,
+        totalEnrolled: majorStudents.length,
+        paidCount: majorStudents.filter(
+          (s) => s.totalPaid >= contributionAmount
+        ).length,
+        partialCount: majorStudents.filter(
+          (s) => s.totalPaid > 0 && s.totalPaid < contributionAmount
+        ).length,
+        unpaidCount: majorStudents.filter((s) => s.totalPaid === 0).length,
+        totalCollected,
+        expectedCollection,
+        outstandingBalance: expectedCollection - totalCollected,
+        collectionRate:
+          expectedCollection > 0
+            ? (totalCollected / expectedCollection) * 100
+            : 0,
+      };
+    });
+
+    // Compute overall data by major (for overall chart grouped by major)
+    const overallByMajor = majors.map((major) => {
+      const data = perMajor[major];
+      return {
+        major,
+        paid: data.paidCount,
+        partial: data.partialCount,
+        unpaid: data.unpaidCount,
+        total: data.totalEnrolled,
+        collected: data.totalCollected,
+        expected: data.expectedCollection,
+      };
+    });
+
+    return {
+      majors,
+      perMajor,
+      overallByMajor,
+      contributionAmount,
+    };
+  }, [metrics, contributionAmount]);
+
   // Filter unpaid/partial students
   const filteredUnpaidStudents = useMemo(() => {
     const allUnpaid = [...metrics.unpaidStudents, ...metrics.partialStudents];
@@ -527,8 +615,9 @@ export function Reports() {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }
 
-  function handleExport(reportType, format) {
+  async function handleExport(reportType, format) {
     setExportDropdown(null);
+    setIsExporting(true);
 
     const timestamp = new Date().toISOString().split("T")[0];
     const options = {
@@ -536,107 +625,137 @@ export function Reports() {
       subtitle: `Generated on ${formatDate(new Date())}`,
     };
 
-    switch (reportType) {
-      case "Collection Summary":
-        // Use the visual export for Collection Summary
-        exportCollectionSummary(
-          {
-            totalEnrolled: metrics.totalEnrolled,
-            totalCollected: metrics.totalCollected,
-            expectedCollection: metrics.expectedCollection,
-            collectionRate: metrics.collectionRate,
-            paidCount: metrics.paidCount,
-            partialCount: metrics.partialCount,
-            unpaidCount: metrics.unpaidCount,
-          },
-          `collection_summary_${timestamp}`,
-          format,
-          {
-            title: `Collection Summary Report`,
-            subtitle: `Generated on ${formatDate(new Date())}`,
-            semesterName: semesterName,
+    try {
+      switch (reportType) {
+        case "Collection Summary":
+          // Use visual export with snapshots for PDF and Word
+          if (format === "pdf" || format === "docx") {
+            await exportVisualCollectionSummary(
+              collectionSummaryRef,
+              {
+                totalEnrolled: metrics.totalEnrolled,
+                totalCollected: metrics.totalCollected,
+                expectedCollection: metrics.expectedCollection,
+                collectionRate: metrics.collectionRate,
+                paidCount: metrics.paidCount,
+                partialCount: metrics.partialCount,
+                unpaidCount: metrics.unpaidCount,
+              },
+              majorMetrics,
+              `collection_summary_${timestamp}`,
+              format,
+              {
+                title: `Collection Summary Report`,
+                subtitle: `Generated on ${formatDate(new Date())}`,
+                semesterName: semesterName,
+              }
+            );
+          } else {
+            // Use table-based export for Excel and CSV
+            await exportCollectionSummary(
+              {
+                totalEnrolled: metrics.totalEnrolled,
+                totalCollected: metrics.totalCollected,
+                expectedCollection: metrics.expectedCollection,
+                collectionRate: metrics.collectionRate,
+                paidCount: metrics.paidCount,
+                partialCount: metrics.partialCount,
+                unpaidCount: metrics.unpaidCount,
+              },
+              `collection_summary_${timestamp}`,
+              format,
+              {
+                title: `Collection Summary Report`,
+                subtitle: `Generated on ${formatDate(new Date())}`,
+                semesterName: semesterName,
+              }
+            );
           }
-        );
-        break;
+          break;
 
-      case "Unpaid Students":
-        exportData(
-          filteredUnpaidStudents.map((s) => ({
-            student_id: s.student_id,
-            full_name: s.full_name,
-            college: s.colleges?.name || "-",
-            department: s.department || "-",
-            year_level: s.year_level || "-",
-            major: s.major || "-",
-            total_paid: formatExportCurrency(s.totalPaid),
-            amount_due: formatExportCurrency(s.amountDue),
-          })),
-          [
-            { key: "student_id", label: "Student ID" },
-            { key: "full_name", label: "Full Name" },
-            { key: "college", label: "College" },
-            { key: "department", label: "Department" },
-            { key: "year_level", label: "Year" },
-            { key: "major", label: "Major" },
-            { key: "total_paid", label: "Paid" },
-            { key: "amount_due", label: "Balance Due" },
-          ],
-          `unpaid_students_${timestamp}`,
-          format,
-          options
-        );
-        break;
+        case "Unpaid Students":
+          await exportData(
+            filteredUnpaidStudents.map((s) => ({
+              student_id: s.student_id,
+              full_name: s.full_name,
+              college: s.colleges?.name || "-",
+              department: s.department || "-",
+              year_level: s.year_level || "-",
+              major: s.major || "-",
+              total_paid: formatExportCurrency(s.totalPaid),
+              amount_due: formatExportCurrency(s.amountDue),
+            })),
+            [
+              { key: "student_id", label: "Student ID" },
+              { key: "full_name", label: "Full Name" },
+              { key: "college", label: "College" },
+              { key: "department", label: "Department" },
+              { key: "year_level", label: "Year" },
+              { key: "major", label: "Major" },
+              { key: "total_paid", label: "Paid" },
+              { key: "amount_due", label: "Balance Due" },
+            ],
+            `unpaid_students_${timestamp}`,
+            format,
+            options
+          );
+          break;
 
-      case "Payment List":
-        exportData(
-          transactions.map((t) => ({
-            date: formatDate(t.created_at),
-            student_id: t.students?.student_id || "-",
-            student_name: t.students?.full_name || "-",
-            amount: formatExportCurrency(t.amount),
-            method: t.payment_methods?.name || "-",
-            receipt: t.physical_receipt_id || "-",
-            gcash_ref: t.gcash_ref_id || "-",
-            verified_by: t.verified_by_profile?.username || "-",
-          })),
-          [
-            { key: "date", label: "Date" },
-            { key: "student_id", label: "Student ID" },
-            { key: "student_name", label: "Student Name" },
-            { key: "amount", label: "Amount" },
-            { key: "method", label: "Method" },
-            { key: "receipt", label: "Receipt #" },
-            { key: "gcash_ref", label: "GCash Ref" },
-            { key: "verified_by", label: "Verified By" },
-          ],
-          `payment_list_${timestamp}`,
-          format,
-          options
-        );
-        break;
+        case "Payment List":
+          await exportData(
+            transactions.map((t) => ({
+              date: formatDate(t.created_at),
+              student_id: t.students?.student_id || "-",
+              student_name: t.students?.full_name || "-",
+              amount: formatExportCurrency(t.amount),
+              method: t.payment_methods?.name || "-",
+              receipt: t.physical_receipt_id || "-",
+              gcash_ref: t.gcash_ref_id || "-",
+              verified_by: t.verified_by_profile?.username || "-",
+            })),
+            [
+              { key: "date", label: "Date" },
+              { key: "student_id", label: "Student ID" },
+              { key: "student_name", label: "Student Name" },
+              { key: "amount", label: "Amount" },
+              { key: "method", label: "Method" },
+              { key: "receipt", label: "Receipt #" },
+              { key: "gcash_ref", label: "GCash Ref" },
+              { key: "verified_by", label: "Verified By" },
+            ],
+            `payment_list_${timestamp}`,
+            format,
+            options
+          );
+          break;
 
-      case "Payment Methods":
-        exportData(
-          methodsBreakdown.map((m) => ({
-            method: m.name,
-            count: m.count.toLocaleString(),
-            total: formatExportCurrency(m.total),
-            percentage:
-              transactions.length > 0
-                ? `${((m.count / transactions.length) * 100).toFixed(1)}%`
-                : "0%",
-          })),
-          [
-            { key: "method", label: "Payment Method" },
-            { key: "count", label: "Transaction Count" },
-            { key: "total", label: "Total Amount" },
-            { key: "percentage", label: "% of Transactions" },
-          ],
-          `payment_methods_${timestamp}`,
-          format,
-          options
-        );
-        break;
+        case "Payment Methods":
+          await exportData(
+            methodsBreakdown.map((m) => ({
+              method: m.name,
+              count: m.count.toLocaleString(),
+              total: formatExportCurrency(m.total),
+              percentage:
+                transactions.length > 0
+                  ? `${((m.count / transactions.length) * 100).toFixed(1)}%`
+                  : "0%",
+            })),
+            [
+              { key: "method", label: "Payment Method" },
+              { key: "count", label: "Transaction Count" },
+              { key: "total", label: "Total Amount" },
+              { key: "percentage", label: "% of Transactions" },
+            ],
+            `payment_methods_${timestamp}`,
+            format,
+            options
+          );
+          break;
+      }
+    } catch (error) {
+      console.error("Export error:", error);
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -703,7 +822,33 @@ export function Reports() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Exporting Overlay */}
+      {isExporting && (
+        <div
+          className="fixed bg-black/60 backdrop-blur-sm flex items-center justify-center"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            zIndex: 99999,
+            margin: 0,
+            padding: 0,
+          }}
+        >
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4 border border-slate-200 dark:border-slate-700">
+            <div className="w-14 h-14 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              Generating Report...
+            </p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Please wait while we prepare your export
+            </p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -768,7 +913,10 @@ export function Reports() {
             </div>
 
             {expandedSections.summary && (
-              <div className="px-6 pb-6 border-t border-slate-200 dark:border-slate-700 pt-6">
+              <div
+                ref={collectionSummaryRef}
+                className="px-6 pb-6 border-t border-slate-200 dark:border-slate-700 pt-6 bg-white dark:bg-slate-800"
+              >
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                   <div className="p-4 bg-linear-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl">
