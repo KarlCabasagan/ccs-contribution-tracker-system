@@ -830,7 +830,7 @@ export function AdminDashboard() {
 
       const enrolledStudents = await fetchAllRows(
         "semester_enrollments",
-        "student_id, enrolled_at, students (student_id, full_name, college_id)",
+        "student_id, enrolled_at, students (student_id, full_name, college_id, year_level, major)",
         { semester_id: activeSemester.id }
       );
 
@@ -1043,10 +1043,17 @@ export function AdminDashboard() {
     return result.slice(-10);
   }, [transactions, filteredStudents, contributionAmount, statusTimeFilter]);
 
-  // Bar chart data - sorted from oldest to newest
+  // Bar chart data - sorted from oldest to newest, filtered by selected students
   const barData = useMemo(() => {
+    // Get student IDs from filtered students
+    const filteredStudentIds = new Set(
+      filteredStudents.map((s) => s.student_id)
+    );
+
     const verifiedTx = transactions.filter(
-      (t) => t.verification_status === "verified"
+      (t) =>
+        t.verification_status === "verified" &&
+        filteredStudentIds.has(t.student_id)
     );
 
     if (verifiedTx.length === 0) return [];
@@ -1097,7 +1104,7 @@ export function AdminDashboard() {
       .map(([name, { count, sortDate }]) => ({ name, count, sortDate }))
       .sort((a, b) => a.sortDate - b.sortDate)
       .slice(-10);
-  }, [transactions, timeFilter]);
+  }, [transactions, timeFilter, filteredStudents]);
 
   function handleTransactionClick(transactionId) {
     navigate(`/transactions?highlight=${transactionId}`);
