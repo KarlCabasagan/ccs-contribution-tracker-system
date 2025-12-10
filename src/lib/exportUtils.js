@@ -20,8 +20,43 @@ import {
 import { saveAs } from "file-saver";
 import { getLogoBase64, getLogoDimensions } from "./logoUtils";
 
+// Import header image for PDF exports
+import headerImage from "../assets/docs/Header.png";
+
 // Currency symbol - use P for compatibility
 const PESO_SYMBOL = "P";
+
+// Cache for header image base64
+let headerImageBase64 = null;
+
+/**
+ * Convert image URL to base64 string
+ */
+async function imageToBase64(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error("Error converting image to base64:", error);
+    return null;
+  }
+}
+
+/**
+ * Get header image as base64 for PDF exports
+ */
+async function getHeaderImageBase64() {
+  if (!headerImageBase64) {
+    headerImageBase64 = await imageToBase64(headerImage);
+  }
+  return headerImageBase64;
+}
 
 /**
  * Export data to various file formats
@@ -260,12 +295,18 @@ async function exportVisualCollectionSummaryPDF(
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  // Header path only (footer removed)
-  const headerPath = "./src/assets/docs/Header.png";
+  // Load header image as base64
+  const headerImageData = await getHeaderImageBase64();
 
   // Helper to add header only
   const addHeader = () => {
-    doc.addImage(headerPath, "PNG", (pageWidth - 184) / 2, 5, 184, 28);
+    if (headerImageData) {
+      try {
+        doc.addImage(headerImageData, "PNG", (pageWidth - 184) / 2, 5, 184, 28);
+      } catch (e) {
+        console.warn("Could not add header image:", e);
+      }
+    }
   };
 
   // ============================================
