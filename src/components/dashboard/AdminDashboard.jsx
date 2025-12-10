@@ -30,6 +30,8 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  LineChart,
+  Line,
 } from "recharts";
 
 // Chart colors
@@ -641,6 +643,14 @@ export function AdminDashboard() {
   const [timeFilter, setTimeFilter] = useState("weekly");
   const [totalEnrolledCount, setTotalEnrolledCount] = useState(0);
 
+  // Status chart toggle state
+  const [statusChartType, setStatusChartType] = useState("pie"); // "pie" or "line"
+  const [statusTimeFilter, setStatusTimeFilter] = useState("weekly");
+
+  // Dashboard filters
+  const [yearFilter, setYearFilter] = useState("all");
+  const [majorFilter, setMajorFilter] = useState("all");
+
   // Modal visibility
   const [showTransactionModal, setShowTransactionModal] = useState(false);
 
@@ -859,9 +869,37 @@ export function AdminDashboard() {
     }
   }
 
-  // Calculate metrics
+  // Extract distinct filter options from students
+  const filterOptions = useMemo(() => {
+    const years = new Set();
+    const majors = new Set();
+
+    students.forEach((enrollment) => {
+      const student = enrollment.students;
+      if (student?.year_level) years.add(student.year_level);
+      if (student?.major) majors.add(student.major);
+    });
+
+    return {
+      years: Array.from(years).sort(),
+      majors: Array.from(majors).sort(),
+    };
+  }, [students]);
+
+  // Filter students based on selected filters
+  const filteredStudents = useMemo(() => {
+    return students.filter((enrollment) => {
+      const student = enrollment.students;
+      if (yearFilter !== "all" && student?.year_level !== yearFilter)
+        return false;
+      if (majorFilter !== "all" && student?.major !== majorFilter) return false;
+      return true;
+    });
+  }, [students, yearFilter, majorFilter]);
+
+  // Calculate metrics using filtered students
   const metrics = useMemo(() => {
-    const totalEnrolled = totalEnrolledCount || students.length;
+    const totalEnrolled = filteredStudents.length;
 
     const studentPayments = {};
     transactions
@@ -878,7 +916,7 @@ export function AdminDashboard() {
     let unpaidCount = 0;
     let totalCollected = 0;
 
-    students.forEach((enrollment) => {
+    filteredStudents.forEach((enrollment) => {
       const paid = studentPayments[enrollment.student_id] || 0;
       totalCollected += paid;
 
@@ -904,7 +942,7 @@ export function AdminDashboard() {
       partialCount,
       unpaidCount,
     };
-  }, [students, transactions, contributionAmount, totalEnrolledCount]);
+  }, [filteredStudents, transactions, contributionAmount]);
 
   // Pie chart data
   const pieData = useMemo(() => {
@@ -915,7 +953,97 @@ export function AdminDashboard() {
     ].filter((d) => d.value > 0);
   }, [metrics]);
 
-  // Bar chart data
+  // Line chart data for payment status trends over time
+  const statusLineData = useMemo(() => {
+    const verifiedTx = transactions.filter(
+      (t) => t.verification_status === "verified"
+    );
+
+    if (verifiedTx.length === 0 || filteredStudents.length === 0) return [];
+
+    // Group verified transactions by time period
+    const grouped = {};
+
+    verifiedTx.forEach((t) => {
+      const date = new Date(t.created_at);
+      let key;
+      let sortDate;
+
+      if (statusTimeFilter === "daily") {
+        key = date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+        sortDate = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate()
+        );
+      } else if (statusTimeFilter === "weekly") {
+        const startOfYear = new Date(date.getFullYear(), 0, 1);
+        const weekNum = Math.ceil(
+          ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
+        );
+        key = `Week ${weekNum}`;
+        const dayOfWeek = date.getDay();
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        sortDate = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate() + diffToMonday
+        );
+      } else {
+        key = date.toLocaleDateString("en-US", { month: "short" });
+        sortDate = new Date(date.getFullYear(), date.getMonth(), 1);
+      }
+
+      if (!grouped[key]) {
+        grouped[key] = { sortDate, payments: [] };
+      }
+      grouped[key].payments.push(t);
+    });
+
+    // Calculate cumulative paid/partial/unpaid for each period
+    const sortedPeriods = Object.entries(grouped)
+      .map(([name, { sortDate, payments }]) => ({ name, sortDate, payments }))
+      .sort((a, b) => a.sortDate - b.sortDate);
+
+    // Build cumulative data
+    const studentPayments = {};
+    const result = [];
+
+    sortedPeriods.forEach(({ name, payments }) => {
+      // Add payments from this period
+      payments.forEach((t) => {
+        if (!studentPayments[t.student_id]) {
+          studentPayments[t.student_id] = 0;
+        }
+        studentPayments[t.student_id] += parseFloat(t.amount);
+      });
+
+      // Count statuses at this point
+      let paid = 0;
+      let partial = 0;
+      let unpaid = 0;
+
+      filteredStudents.forEach((enrollment) => {
+        const totalPaid = studentPayments[enrollment.student_id] || 0;
+        if (totalPaid >= contributionAmount) {
+          paid++;
+        } else if (totalPaid > 0) {
+          partial++;
+        } else {
+          unpaid++;
+        }
+      });
+
+      result.push({ name, paid, partial, unpaid });
+    });
+
+    return result.slice(-10);
+  }, [transactions, filteredStudents, contributionAmount, statusTimeFilter]);
+
+  // Bar chart data - sorted from oldest to newest
   const barData = useMemo(() => {
     const verifiedTx = transactions.filter(
       (t) => t.verification_status === "verified"
@@ -923,35 +1051,51 @@ export function AdminDashboard() {
 
     if (verifiedTx.length === 0) return [];
 
-    const grouped = {};
+    const grouped = {}; // { key: { count: number, sortDate: Date } }
 
     verifiedTx.forEach((t) => {
       const date = new Date(t.created_at);
       let key;
+      let sortDate;
 
       if (timeFilter === "daily") {
         key = date.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
         });
+        sortDate = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate()
+        );
       } else if (timeFilter === "weekly") {
         const startOfYear = new Date(date.getFullYear(), 0, 1);
         const weekNum = Math.ceil(
           ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
         );
         key = `Week ${weekNum}`;
+        // Use Monday of that week as sort date
+        const dayOfWeek = date.getDay();
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        sortDate = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate() + diffToMonday
+        );
       } else {
         key = date.toLocaleDateString("en-US", { month: "short" });
+        sortDate = new Date(date.getFullYear(), date.getMonth(), 1);
       }
 
       if (!grouped[key]) {
-        grouped[key] = 0;
+        grouped[key] = { count: 0, sortDate };
       }
-      grouped[key]++;
+      grouped[key].count++;
     });
 
     return Object.entries(grouped)
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, { count, sortDate }]) => ({ name, count, sortDate }))
+      .sort((a, b) => a.sortDate - b.sortDate)
       .slice(-10);
   }, [transactions, timeFilter]);
 
@@ -1000,6 +1144,54 @@ export function AdminDashboard() {
           Record Transaction
         </Button>
       </div>
+
+      {/* Dashboard Filters */}
+      {(filterOptions.years.length > 0 || filterOptions.majors.length > 0) && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-slate-500 dark:text-slate-400">
+            Filter by:
+          </span>
+          {filterOptions.years.length > 0 && (
+            <select
+              value={yearFilter}
+              onChange={(e) => setYearFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="all">All Year Levels</option>
+              {filterOptions.years.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          )}
+          {filterOptions.majors.length > 0 && (
+            <select
+              value={majorFilter}
+              onChange={(e) => setMajorFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="all">All Majors</option>
+              {filterOptions.majors.map((major) => (
+                <option key={major} value={major}>
+                  {major}
+                </option>
+              ))}
+            </select>
+          )}
+          {(yearFilter !== "all" || majorFilter !== "all") && (
+            <button
+              onClick={() => {
+                setYearFilter("all");
+                setMajorFilter("all");
+              }}
+              className="text-sm text-primary-500 hover:text-primary-600 dark:hover:text-primary-400"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Metrics Cards - Dynamic 4/5 columns */}
       <div
@@ -1142,44 +1334,141 @@ export function AdminDashboard() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-6">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">
-            Payment Status Distribution
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              Payment Status Distribution
+            </h2>
+            <div className="flex items-center gap-2">
+              {/* Chart Type Toggle */}
+              <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                <button
+                  onClick={() => setStatusChartType("pie")}
+                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                    statusChartType === "pie"
+                      ? "bg-primary-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  Pie
+                </button>
+                <button
+                  onClick={() => setStatusChartType("line")}
+                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                    statusChartType === "line"
+                      ? "bg-primary-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  Line
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Time filter for line chart */}
+          {statusChartType === "line" && (
+            <div className="flex justify-end mb-4">
+              <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                {["daily", "weekly", "monthly"].map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setStatusTimeFilter(filter)}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      statusTimeFilter === filter
+                        ? "bg-primary-500 text-white"
+                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                    }`}
+                  >
+                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="loading-shimmer h-64 rounded-lg" />
-          ) : pieData.length === 0 ? (
+          ) : statusChartType === "pie" ? (
+            pieData.length === 0 ? (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No data available
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    outerRadius={100}
+                    dataKey="value"
+                    label={({ name, percent }) =>
+                      `${name}: ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value, name) => [
+                      `${value} students (${(
+                        (value / metrics.totalEnrolled) *
+                        100
+                      ).toFixed(1)}%)`,
+                      name,
+                    ]}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            )
+          ) : statusLineData.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-slate-500">
-              No data available
+              No trend data available
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  outerRadius={100}
-                  dataKey="value"
-                  label={({ name, percent }) =>
-                    `${name}: ${(percent * 100).toFixed(0)}%`
-                  }
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, name) => [
-                    `${value} students (${(
-                      (value / metrics.totalEnrolled) *
-                      100
-                    ).toFixed(1)}%)`,
-                    name,
-                  ]}
+              <LineChart data={statusLineData}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 12 }}
+                  tickLine={false}
                 />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip />
                 <Legend />
-              </PieChart>
+                <Line
+                  type="monotone"
+                  dataKey="paid"
+                  stroke={COLORS.paid}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  name="Paid"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="partial"
+                  stroke={COLORS.partial}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  name="Partial"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="unpaid"
+                  stroke={COLORS.unpaid}
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  name="Unpaid"
+                />
+              </LineChart>
             </ResponsiveContainer>
           )}
         </Card>
