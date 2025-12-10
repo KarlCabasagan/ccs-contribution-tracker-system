@@ -980,9 +980,12 @@ export function AdminDashboard() {
           date.getDate()
         );
       } else if (statusTimeFilter === "weekly") {
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil(
-          ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
+        const semesterStart = activeSemester?.start_date
+          ? new Date(activeSemester.start_date)
+          : new Date(date.getFullYear(), 0, 1);
+        const weekNum = Math.max(
+          1,
+          Math.ceil((date - semesterStart) / (7 * 86400000)) + 1
         );
         key = `Week ${weekNum}`;
         const dayOfWeek = date.getDay();
@@ -1076,9 +1079,12 @@ export function AdminDashboard() {
           date.getDate()
         );
       } else if (timeFilter === "weekly") {
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil(
-          ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
+        const semesterStart = activeSemester?.start_date
+          ? new Date(activeSemester.start_date)
+          : new Date(date.getFullYear(), 0, 1);
+        const weekNum = Math.max(
+          1,
+          Math.ceil((date - semesterStart) / (7 * 86400000)) + 1
         );
         key = `Week ${weekNum}`;
         // Use Monday of that week as sort date

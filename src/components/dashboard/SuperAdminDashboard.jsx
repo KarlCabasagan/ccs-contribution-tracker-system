@@ -1032,6 +1032,7 @@ export function SuperAdminDashboard() {
   }, [metrics]);
 
   // Line chart data for payment status trends over time
+  const selectedSemester = semesters.find((s) => s.id === selectedSemesterId);
   const statusLineData = useMemo(() => {
     const verifiedTx = transactions.filter(
       (t) => t.verification_status === "verified"
@@ -1058,9 +1059,12 @@ export function SuperAdminDashboard() {
           date.getDate()
         );
       } else if (statusTimeFilter === "weekly") {
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil(
-          ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
+        const semesterStart = selectedSemester?.start_date
+          ? new Date(selectedSemester.start_date)
+          : new Date(date.getFullYear(), 0, 1);
+        const weekNum = Math.max(
+          1,
+          Math.ceil((date - semesterStart) / (7 * 86400000)) + 1
         );
         key = `Week ${weekNum}`;
         const dayOfWeek = date.getDay();
@@ -1154,9 +1158,12 @@ export function SuperAdminDashboard() {
           date.getDate()
         );
       } else if (timeFilter === "weekly") {
-        const startOfYear = new Date(date.getFullYear(), 0, 1);
-        const weekNum = Math.ceil(
-          ((date - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7
+        const semesterStart = selectedSemester?.start_date
+          ? new Date(selectedSemester.start_date)
+          : new Date(date.getFullYear(), 0, 1);
+        const weekNum = Math.max(
+          1,
+          Math.ceil((date - semesterStart) / (7 * 86400000)) + 1
         );
         key = `Week ${weekNum}`;
         // Use Monday of that week as sort date
@@ -1187,8 +1194,6 @@ export function SuperAdminDashboard() {
   function handleTransactionClick(transactionId) {
     navigate(`/transactions?highlight=${transactionId}`);
   }
-
-  const selectedSemester = semesters.find((s) => s.id === selectedSemesterId);
 
   return (
     <div className="space-y-6">
