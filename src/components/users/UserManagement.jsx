@@ -22,6 +22,7 @@ import {
   Calendar,
   Copy,
   Check,
+  Archive,
 } from "lucide-react";
 import { formatDate } from "../../lib/utils";
 
@@ -42,6 +43,12 @@ const STATUS_OPTIONS = [
   { value: "suspended", label: "Suspended" },
 ];
 
+const ARCHIVE_FILTER_OPTIONS = [
+  { value: "not_archived", label: "Active Users" },
+  { value: "archived", label: "Archived Users" },
+  { value: "all", label: "All Users" },
+];
+
 const ROLE_FILTER_OPTIONS = [
   { value: "all", label: "All Roles" },
   { value: "user", label: "Users" },
@@ -58,6 +65,7 @@ export function UserManagement() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [copiedEmail, setCopiedEmail] = useState(null);
+  const [archiveFilter, setArchiveFilter] = useState("not_archived");
 
   // Suspend modal state
   const [showSuspendModal, setShowSuspendModal] = useState(false);
@@ -197,8 +205,12 @@ export function UserManagement() {
     const buttonEl = dropdownButtonRefs.current[userId];
     if (buttonEl) {
       const rect = buttonEl.getBoundingClientRect();
+      const dropdownHeight = 140; // Approximate height of dropdown
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const goUp = spaceBelow < dropdownHeight;
+
       setDropdownPosition({
-        top: rect.bottom + 4,
+        top: goUp ? rect.top - dropdownHeight - 4 : rect.bottom + 4,
         left: rect.left,
       });
     }
@@ -312,6 +324,7 @@ export function UserManagement() {
                 suspended_by_username: null,
                 unsuspended_by: currentUser.id,
                 unsuspended_by_username: currentProfile?.username,
+                is_archived: false, // Auto-unarchive when unsuspending
               }
             : u
         )
@@ -324,6 +337,7 @@ export function UserManagement() {
           suspension_reason: null,
           suspended_by: null,
           unsuspended_by: currentUser.id,
+          is_archived: false, // Auto-unarchive when unsuspending
         })
         .eq("id", userId);
 
@@ -343,6 +357,48 @@ export function UserManagement() {
       setTimeout(() => setCopiedEmail(null), 2000);
     } catch (e) {
       console.error("Copy failed:", e);
+    }
+  }
+
+  async function archiveUser(userId) {
+    try {
+      // Optimistic update
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, is_archived: true } : u))
+      );
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_archived: true })
+        .eq("id", userId);
+
+      if (error) {
+        fetchUsers();
+        throw error;
+      }
+    } catch (error) {
+      alert("Error archiving user: " + error.message);
+    }
+  }
+
+  async function unarchiveUser(userId) {
+    try {
+      // Optimistic update
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, is_archived: false } : u))
+      );
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_archived: false })
+        .eq("id", userId);
+
+      if (error) {
+        fetchUsers();
+        throw error;
+      }
+    } catch (error) {
+      alert("Error unarchiving user: " + error.message);
     }
   }
 
@@ -423,7 +479,11 @@ export function UserManagement() {
       email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
     const matchesStatus = statusFilter === "all" || u.status === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
+    const matchesArchive =
+      archiveFilter === "all" ||
+      (archiveFilter === "archived" && u.is_archived) ||
+      (archiveFilter === "not_archived" && !u.is_archived);
+    return matchesSearch && matchesRole && matchesStatus && matchesArchive;
   });
 
   return (
@@ -441,7 +501,11 @@ export function UserManagement() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div
+        className={`grid grid-cols-2 md:grid-cols-${
+          users.some((u) => u.is_archived) ? "5" : "4"
+        } gap-4`}
+      >
         <Card className="p-4 glass text-center">
           <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">
             {users.length}
@@ -466,6 +530,14 @@ export function UserManagement() {
           </p>
           <p className="text-sm text-slate-500">Pending</p>
         </Card>
+        {users.some((u) => u.is_archived) && (
+          <Card className="p-4 glass text-center">
+            <p className="text-2xl font-bold text-slate-500">
+              {users.filter((u) => u.is_archived).length}
+            </p>
+            <p className="text-sm text-slate-500">Archived</p>
+          </Card>
+        )}
       </div>
 
       {/* Role Dropdown Portal */}
@@ -551,6 +623,18 @@ export function UserManagement() {
               </option>
             ))}
           </select>
+
+          <select
+            value={archiveFilter}
+            onChange={(e) => setArchiveFilter(e.target.value)}
+            className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {ARCHIVE_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
       </Card>
 
@@ -598,6 +682,10 @@ export function UserManagement() {
                       <tr
                         className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer ${
                           isExpanded ? "bg-slate-50 dark:bg-slate-800/50" : ""
+                        } ${
+                          u.is_archived
+                            ? "opacity-60 bg-slate-100 dark:bg-slate-900/50"
+                            : ""
                         }`}
                         onClick={() =>
                           setExpandedUserId(isExpanded ? null : u.id)
@@ -700,7 +788,7 @@ export function UserManagement() {
 
                         {/* Actions */}
                         <td
-                          className="px-4 py-3 text-right"
+                          className="px-4 py-3 text-right flex"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {canModifyUser(u) && (
@@ -724,6 +812,28 @@ export function UserManagement() {
                                 >
                                   <UserCheck className="w-4 h-4" />
                                   Unsuspend
+                                </Button>
+                              )}
+                              {u.status === "suspended" && !u.is_archived && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => archiveUser(u.id)}
+                                  className="text-slate-600 border-slate-200 hover:bg-slate-50 dark:text-slate-400 dark:border-slate-600 dark:hover:bg-slate-700 flex items-center justify-center gap-1 ml-2"
+                                >
+                                  <Archive className="w-4 h-4" />
+                                  Archive
+                                </Button>
+                              )}
+                              {u.is_archived && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => unarchiveUser(u.id)}
+                                  className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-600 dark:hover:bg-blue-900/20 flex items-center justify-center gap-1 ml-2"
+                                >
+                                  <Archive className="w-4 h-4" />
+                                  Unarchive
                                 </Button>
                               )}
                             </>

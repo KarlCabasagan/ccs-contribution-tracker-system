@@ -58,6 +58,7 @@ CREATE TABLE profiles (
     suspended_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
     unsuspended_by UUID,
     is_first_admin BOOLEAN DEFAULT false,
+    is_archived BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
