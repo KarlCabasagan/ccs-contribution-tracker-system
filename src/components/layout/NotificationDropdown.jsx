@@ -210,6 +210,9 @@ export function NotificationDropdown() {
       if (error) throw error;
 
       setNotifications((prev) => prev.filter((n) => !n.is_read));
+
+      // Refetch to fill the list with remaining notifications
+      fetchNotifications();
     } catch (error) {
       console.error("Error clearing read notifications:", error);
     }
@@ -226,6 +229,9 @@ export function NotificationDropdown() {
       if (error) throw error;
 
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+
+      // Refetch to fill the list with remaining notifications
+      fetchNotifications();
     } catch (error) {
       console.error("Error deleting notification:", error);
     }

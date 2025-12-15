@@ -181,10 +181,11 @@ const RecordTransactionModal = memo(function RecordTransactionModal({
             `
             student_id,
             full_name,
-            semester_enrollments!inner (semester_id)
+            semester_enrollments!inner (semester_id, is_active)
           `
           )
           .eq("semester_enrollments.semester_id", semesterId)
+          .eq("semester_enrollments.is_active", true)
           .or(`full_name.ilike.%${query}%,student_id.ilike.%${query}%`)
           .limit(10);
 
@@ -785,10 +786,11 @@ export function AdminDashboard() {
       const { data } = await supabase
         .from("semester_enrollments")
         .select(
-          "student_id, enrolled_at, students (student_id, full_name, college_id)"
+          "student_id, enrolled_at, is_active, students (student_id, full_name, college_id)"
         )
         .eq("semester_id", activeSemester.id)
         .eq("student_id", studentId)
+        .eq("is_active", true)
         .single();
 
       if (data) {
@@ -830,8 +832,8 @@ export function AdminDashboard() {
 
       const enrolledStudents = await fetchAllRows(
         "semester_enrollments",
-        "student_id, enrolled_at, students (student_id, full_name, college_id, year_level, major)",
-        { semester_id: activeSemester.id }
+        "student_id, enrolled_at, is_active, students (student_id, full_name, college_id, year_level, major)",
+        { semester_id: activeSemester.id, is_active: true }
       );
 
       setStudents(enrolledStudents);

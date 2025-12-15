@@ -313,6 +313,7 @@ export function Reports() {
         .select(
           `
           student_id,
+          is_active,
           students (
             student_id,
             full_name,
@@ -326,6 +327,7 @@ export function Reports() {
         )
         .eq("semester_id", selectedSemesterId)
         .eq("student_id", studentId)
+        .eq("is_active", true)
         .single();
 
       if (data) {
@@ -375,6 +377,7 @@ export function Reports() {
         "semester_enrollments",
         `
           student_id,
+          is_active,
           students (
             student_id,
             full_name,
@@ -385,7 +388,7 @@ export function Reports() {
             colleges (name, code)
           )
         `,
-        { semester_id: selectedSemesterId }
+        { semester_id: selectedSemesterId, is_active: true }
       );
 
       // Fetch verified transactions (bypassing 1000 limit)

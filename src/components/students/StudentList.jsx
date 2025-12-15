@@ -222,8 +222,11 @@ export function StudentList() {
     try {
       const { data } = await supabase
         .from("students")
-        .select("year_level, major, semester_enrollments!inner(semester_id)")
-        .eq("semester_enrollments.semester_id", semesterId);
+        .select(
+          "year_level, major, semester_enrollments!inner(semester_id, is_active)"
+        )
+        .eq("semester_enrollments.semester_id", semesterId)
+        .eq("semester_enrollments.is_active", true);
 
       if (data) {
         const uniqueYears = [
@@ -257,12 +260,14 @@ export function StudentList() {
           colleges (id, name, code),
           semester_enrollments!inner (
             semester_id,
+            is_active,
             enrolled_at
           )
         `,
           { count: "exact" }
         )
-        .eq("semester_enrollments.semester_id", currentSemesterId);
+        .eq("semester_enrollments.semester_id", currentSemesterId)
+        .eq("semester_enrollments.is_active", true);
 
       // Add search filter if query exists
       if (query && query.trim()) {
@@ -396,12 +401,14 @@ export function StudentList() {
           colleges (id, name, code),
           semester_enrollments!inner (
             semester_id,
+            is_active,
             enrolled_at
           )
         `,
           { count: "exact" }
         )
         .eq("semester_enrollments.semester_id", targetSemesterId)
+        .eq("semester_enrollments.is_active", true)
         .order("full_name");
 
       if (error) throw error;

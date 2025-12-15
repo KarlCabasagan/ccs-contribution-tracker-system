@@ -15,6 +15,9 @@ import {
   RefreshCw,
   Edit3,
   Clock,
+  UserMinus,
+  UserPlus,
+  Users,
 } from "lucide-react";
 
 export function StudentImporter() {
@@ -29,11 +32,18 @@ export function StudentImporter() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showResults, setShowResults] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(true); // true = preview, false = final results
+  const [pendingImportData, setPendingImportData] = useState(null); // Stores data for confirmation
+  const [isConfirming, setIsConfirming] = useState(false); // Loading state for confirmation
   const [results, setResults] = useState({
     inserted: 0,
     updated: 0,
     unchanged: 0,
+    newEnrollments: 0,
+    reactivated: 0,
+    deactivated: 0,
     errors: [],
+    studentsToDeactivate: [], // List of students to show in preview
   });
   const fileInputRef = useRef(null);
 
@@ -271,11 +281,11 @@ export function StudentImporter() {
   }
 
   async function processBatchImport(studentsArray, semesterId) {
+    // This function now only generates PREVIEW data - no database changes
     const errors = [];
-    let insertedCount = 0;
-    let updatedCount = 0;
-    let unchangedCount = 0;
-    const importEntries = []; // Track inserted/updated students for log
+    let toInsert = [];
+    let toUpdate = [];
+    let unchangedStudents = [];
 
     // Step 1: Get all colleges to match codes
     const { data: colleges } = await supabase.from("colleges").select("*");
@@ -291,7 +301,7 @@ export function StudentImporter() {
     studentsArray.forEach((student, index) => {
       if (seen.has(student.student_id)) {
         errors.push({
-          row: index + 2, // +2 for header and 0-index
+          row: index + 2,
           student_id: student.student_id,
           error: "Duplicate ID in file",
         });
@@ -301,11 +311,10 @@ export function StudentImporter() {
       }
     });
 
-    // Step 3: Fetch existing students to compare (batched to bypass 1000 limit)
+    // Step 3: Fetch existing students to compare
     const studentIds = uniqueStudents.map((s) => s.student_id);
     const existingMap = {};
 
-    // Fetch in batches of 500 to stay well under limit
     const FETCH_BATCH_SIZE = 500;
     for (let i = 0; i < studentIds.length; i += FETCH_BATCH_SIZE) {
       const batchIds = studentIds.slice(i, i + FETCH_BATCH_SIZE);
@@ -319,97 +328,235 @@ export function StudentImporter() {
       });
     }
 
-    // Step 4: Process in batches of 100
-    const BATCH_SIZE = 100;
-    const batches = [];
-    for (let i = 0; i < uniqueStudents.length; i += BATCH_SIZE) {
-      batches.push(uniqueStudents.slice(i, i + BATCH_SIZE));
+    // Step 4: Fetch existing enrollments for this semester (batched to bypass 1000 limit)
+    let allEnrollments = [];
+    let enrollmentOffset = 0;
+    let hasMoreEnrollments = true;
+
+    while (hasMoreEnrollments) {
+      const { data: enrollmentBatch } = await supabase
+        .from("semester_enrollments")
+        .select("student_id, is_active")
+        .eq("semester_id", semesterId)
+        .range(enrollmentOffset, enrollmentOffset + FETCH_BATCH_SIZE - 1);
+
+      if (enrollmentBatch && enrollmentBatch.length > 0) {
+        allEnrollments = [...allEnrollments, ...enrollmentBatch];
+        enrollmentOffset += FETCH_BATCH_SIZE;
+        hasMoreEnrollments = enrollmentBatch.length === FETCH_BATCH_SIZE;
+      } else {
+        hasMoreEnrollments = false;
+      }
     }
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
+    const existingEnrollments = allEnrollments;
 
-      // Prepare payload
-      const studentPayload = await Promise.all(
-        batch.map(async (s) => {
-          let collegeId = collegeMap[s.college_code];
+    const enrollmentMap = {};
+    existingEnrollments?.forEach((e) => {
+      enrollmentMap[e.student_id] = e;
+    });
 
-          // Auto-create college if it doesn't exist
-          if (s.college_code && !collegeId) {
-            const { data: newCollege, error: collegeError } = await supabase
-              .from("colleges")
-              .insert({ code: s.college_code, name: s.college_code })
-              .select()
-              .single();
+    // Step 5: Categorize students
+    const masterlistStudentIds = new Set(
+      uniqueStudents.map((s) => s.student_id)
+    );
 
-            if (!collegeError && newCollege) {
-              collegeId = newCollege.id;
-              collegeMap[s.college_code] = collegeId;
-            }
-          }
+    // Students currently enrolled (active) but NOT in masterlist - will be deactivated
+    const studentsToDeactivate =
+      existingEnrollments
+        ?.filter((e) => e.is_active && !masterlistStudentIds.has(e.student_id))
+        .map((e) => e.student_id) || [];
 
-          const payload = {
-            student_id: s.student_id,
-            full_name: s.full_name,
-            major: s.major || null,
-            year_level: s.year_level || null,
-            department: s.department || null,
-            college_id: collegeId || null,
-          };
+    // Fetch full student info for deactivation list
+    let studentsToDeactivateInfo = [];
+    if (studentsToDeactivate.length > 0) {
+      const { data: deactivateStudents } = await supabase
+        .from("students")
+        .select("student_id, full_name")
+        .in("student_id", studentsToDeactivate);
+      studentsToDeactivateInfo = deactivateStudents || [];
+    }
 
-          // Helper to compare values robustly (treats null/undefined/"" as equal, trims strings)
-          const areValuesDifferent = (val1, val2) => {
-            const v1 =
-              val1 === null || val1 === undefined ? "" : String(val1).trim();
-            const v2 =
-              val2 === null || val2 === undefined ? "" : String(val2).trim();
-            return v1 !== v2;
-          };
+    // Categorize new enrollments and reactivations
+    let newEnrollmentCount = 0;
+    let reactivatedCount = 0;
 
-          // Check if data has changed
-          const existing = existingMap[s.student_id];
-          if (existing) {
-            const hasChanges =
-              areValuesDifferent(existing.full_name, payload.full_name) ||
-              areValuesDifferent(existing.major, payload.major) ||
-              areValuesDifferent(existing.year_level, payload.year_level) ||
-              areValuesDifferent(existing.department, payload.department) ||
-              areValuesDifferent(existing.college_id, payload.college_id);
+    // Step 6: Process each student to categorize
+    for (const s of uniqueStudents) {
+      let collegeId = collegeMap[s.college_code];
 
-            if (!hasChanges) {
-              return { ...payload, _unchanged: true };
-            }
-          }
+      // Auto-create college if it doesn't exist (will happen on confirm)
+      if (s.college_code && !collegeId) {
+        // We'll create it during confirmation, for now just note it
+        collegeId = null;
+      }
 
-          return payload;
-        })
+      const payload = {
+        student_id: s.student_id,
+        full_name: s.full_name,
+        major: s.major || null,
+        year_level: s.year_level || null,
+        department: s.department || null,
+        college_id: collegeId || null,
+        college_code: s.college_code, // Keep for college creation during confirm
+      };
+
+      const areValuesDifferent = (val1, val2) => {
+        const v1 =
+          val1 === null || val1 === undefined ? "" : String(val1).trim();
+        const v2 =
+          val2 === null || val2 === undefined ? "" : String(val2).trim();
+        return v1 !== v2;
+      };
+
+      const existing = existingMap[s.student_id];
+      if (existing) {
+        const hasChanges =
+          areValuesDifferent(existing.full_name, payload.full_name) ||
+          areValuesDifferent(existing.major, payload.major) ||
+          areValuesDifferent(existing.year_level, payload.year_level) ||
+          areValuesDifferent(existing.department, payload.department) ||
+          areValuesDifferent(existing.college_id, payload.college_id);
+
+        if (hasChanges) {
+          toUpdate.push({ ...payload, _oldData: existing });
+        } else {
+          unchangedStudents.push(payload);
+        }
+      } else {
+        toInsert.push(payload);
+      }
+
+      // Check enrollment status
+      const enrollment = enrollmentMap[s.student_id];
+      if (!enrollment) {
+        newEnrollmentCount++;
+      } else if (!enrollment.is_active) {
+        reactivatedCount++;
+      }
+
+      setProgress(
+        Math.round(
+          ((uniqueStudents.indexOf(s) + 1) / uniqueStudents.length) * 50
+        )
       );
+    }
 
-      // Separate unchanged from changed/new
-      const toUpsert = studentPayload.filter((p) => !p._unchanged);
-      unchangedCount += studentPayload.filter((p) => p._unchanged).length;
+    setProgress(100);
 
-      if (toUpsert.length > 0) {
-        // Clean the _unchanged flag
-        toUpsert.forEach((p) => delete p._unchanged);
+    // Store pending data for confirmation
+    setPendingImportData({
+      studentsArray: uniqueStudents,
+      semesterId,
+      toInsert,
+      toUpdate,
+      unchangedStudents,
+      collegeMap,
+      existingMap,
+      studentsToDeactivate,
+    });
+
+    // Show preview results
+    // Note: Deactivated students have unchanged DATA, only enrollment changes
+    setResults({
+      inserted: toInsert.length,
+      updated: toUpdate.length,
+      unchanged: unchangedStudents.length + studentsToDeactivate.length,
+      newEnrollments: newEnrollmentCount,
+      reactivated: reactivatedCount,
+      deactivated: studentsToDeactivate.length,
+      errors,
+      studentsToDeactivate: studentsToDeactivateInfo,
+    });
+    setIsPreviewMode(true);
+    setShowResults(true);
+    setUploading(false);
+  }
+
+  async function confirmImport() {
+    if (!pendingImportData) return;
+
+    setIsConfirming(true);
+    const {
+      studentsArray,
+      semesterId,
+      toInsert,
+      toUpdate,
+      unchangedStudents,
+      existingMap,
+      studentsToDeactivate,
+    } = pendingImportData;
+
+    const errors = [];
+    let insertedCount = 0;
+    let updatedCount = 0;
+    let newEnrollmentCount = 0;
+    let reactivatedCount = 0;
+    let deactivatedCount = 0;
+    const importEntries = [];
+
+    // Get fresh college map
+    const { data: colleges } = await supabase.from("colleges").select("*");
+    const collegeMap = {};
+    colleges?.forEach((c) => {
+      collegeMap[c.code.toUpperCase()] = c.id;
+    });
+
+    try {
+      // Step 1: Process students to insert/update
+      const allStudents = [...toInsert, ...toUpdate];
+      const BATCH_SIZE = 100;
+
+      for (let i = 0; i < allStudents.length; i += BATCH_SIZE) {
+        const batch = allStudents.slice(i, i + BATCH_SIZE);
+
+        // Prepare payload with college creation
+        const studentPayload = await Promise.all(
+          batch.map(async (s) => {
+            let collegeId = collegeMap[s.college_code];
+
+            // Auto-create college if it doesn't exist
+            if (s.college_code && !collegeId) {
+              const { data: newCollege, error: collegeError } = await supabase
+                .from("colleges")
+                .insert({ code: s.college_code, name: s.college_code })
+                .select()
+                .single();
+
+              if (!collegeError && newCollege) {
+                collegeId = newCollege.id;
+                collegeMap[s.college_code] = collegeId;
+              }
+            }
+
+            return {
+              student_id: s.student_id,
+              full_name: s.full_name,
+              major: s.major || null,
+              year_level: s.year_level || null,
+              department: s.department || null,
+              college_id: collegeId || null,
+            };
+          })
+        );
 
         // Upsert students
         const { data: upsertedStudents, error: upsertError } = await supabase
           .from("students")
-          .upsert(toUpsert, { onConflict: "student_id" })
+          .upsert(studentPayload, { onConflict: "student_id" })
           .select();
 
         if (upsertError) {
           console.error("Upsert error:", upsertError);
           errors.push({
-            batch: batchIndex + 1,
+            batch: Math.floor(i / BATCH_SIZE) + 1,
             error: upsertError.message,
           });
           continue;
         }
 
-        // Count inserted vs updated and track entries
-        upsertedStudents.forEach((s) => {
+        // Track entries
+        upsertedStudents?.forEach((s) => {
           const existing = existingMap[s.student_id];
           if (existing) {
             updatedCount++;
@@ -430,25 +577,80 @@ export function StudentImporter() {
           }
         });
 
-        // Create enrollment records
-        const enrollments = upsertedStudents.map((s) => ({
-          student_id: s.student_id,
+        setProgress(Math.round(((i + BATCH_SIZE) / allStudents.length) * 40));
+      }
+
+      // Step 2: Enroll/reactivate ALL students from masterlist
+      const allMasterlistIds = studentsArray.map((s) => s.student_id);
+      const enrollmentBatches = [];
+      for (let i = 0; i < allMasterlistIds.length; i += BATCH_SIZE) {
+        enrollmentBatches.push(allMasterlistIds.slice(i, i + BATCH_SIZE));
+      }
+
+      // Fetch existing enrollments to count new vs reactivated (batched)
+      let allExistingEnrollments = [];
+      for (let i = 0; i < allMasterlistIds.length; i += BATCH_SIZE) {
+        const batchIds = allMasterlistIds.slice(i, i + BATCH_SIZE);
+        const { data: enrollmentBatch } = await supabase
+          .from("semester_enrollments")
+          .select("student_id, is_active")
+          .eq("semester_id", semesterId)
+          .in("student_id", batchIds);
+
+        if (enrollmentBatch) {
+          allExistingEnrollments = [
+            ...allExistingEnrollments,
+            ...enrollmentBatch,
+          ];
+        }
+      }
+
+      const enrollmentMap = {};
+      allExistingEnrollments.forEach((e) => {
+        enrollmentMap[e.student_id] = e;
+      });
+
+      for (const batch of enrollmentBatches) {
+        const enrollments = batch.map((studentId) => ({
+          student_id: studentId,
           semester_id: semesterId,
+          is_active: true,
           enrolled_at: new Date().toISOString(),
         }));
 
         await supabase.from("semester_enrollments").upsert(enrollments, {
           onConflict: "student_id,semester_id",
-          ignoreDuplicates: true,
+        });
+
+        // Count new enrollments vs reactivations
+        batch.forEach((studentId) => {
+          const existing = enrollmentMap[studentId];
+          if (!existing) {
+            newEnrollmentCount++;
+          } else if (!existing.is_active) {
+            reactivatedCount++;
+          }
         });
       }
 
-      // Update progress
-      setProgress(Math.round(((batchIndex + 1) / batches.length) * 100));
-    }
+      setProgress(70);
 
-    // Create import log record
-    try {
+      // Step 3: Deactivate enrollments for students NOT in masterlist
+      if (studentsToDeactivate.length > 0) {
+        for (let i = 0; i < studentsToDeactivate.length; i += BATCH_SIZE) {
+          const batch = studentsToDeactivate.slice(i, i + BATCH_SIZE);
+          await supabase
+            .from("semester_enrollments")
+            .update({ is_active: false })
+            .eq("semester_id", semesterId)
+            .in("student_id", batch);
+        }
+        deactivatedCount = studentsToDeactivate.length;
+      }
+
+      setProgress(85);
+
+      // Step 4: Create import log record
       const { data: logRecord, error: logError } = await supabase
         .from("student_import_logs")
         .insert({
@@ -458,7 +660,7 @@ export function StudentImporter() {
           total_rows: studentsArray.length,
           inserted_count: insertedCount,
           updated_count: updatedCount,
-          unchanged_count: unchangedCount,
+          unchanged_count: unchangedStudents.length,
           error_count: errors.length,
         })
         .select()
@@ -468,12 +670,8 @@ export function StudentImporter() {
         console.error("Error creating import log:", logError);
       } else if (logRecord && importEntries.length > 0) {
         // Create import entry records in batches
-        const entryBatches = [];
         for (let i = 0; i < importEntries.length; i += 100) {
-          entryBatches.push(importEntries.slice(i, i + 100));
-        }
-
-        for (const entryBatch of entryBatches) {
+          const entryBatch = importEntries.slice(i, i + 100);
           const entriesToInsert = entryBatch.map((entry) => ({
             import_log_id: logRecord.id,
             student_id: entry.student_id,
@@ -481,29 +679,27 @@ export function StudentImporter() {
             old_data: entry.old_data,
             new_data: entry.new_data,
           }));
-
           await supabase.from("student_import_entries").insert(entriesToInsert);
         }
       }
 
-      // Create notifications for super admins
+      setProgress(95);
+
+      // Step 5: Create notifications for super admins
       if (logRecord) {
         try {
-          // Get semester name for notification
           const { data: semInfo } = await supabase
             .from("semesters")
             .select("name")
             .eq("id", semesterId)
             .single();
 
-          // Get super admins with student_imports enabled
           const { data: superAdmins } = await supabase
             .from("profiles")
             .select("id, username, notification_preferences")
             .eq("role", "super_admin")
             .eq("status", "active");
 
-          // Get current user's profile for username
           const { data: currentProfile } = await supabase
             .from("profiles")
             .select("username")
@@ -514,10 +710,7 @@ export function StudentImporter() {
           const currentUsername = currentProfile?.username || "Unknown";
 
           superAdmins?.forEach((admin) => {
-            // Skip self-notification
             if (admin.id === user?.id) return;
-
-            // Check if they have student_imports enabled
             const prefs = admin.notification_preferences || {};
             if (prefs.student_imports === false) return;
 
@@ -526,7 +719,7 @@ export function StudentImporter() {
               type: "student_import",
               message: `${currentUsername} imported students to ${
                 semInfo?.name || "semester"
-              }: +${insertedCount} new, ${updatedCount} updated`,
+              }: +${insertedCount} new, ${updatedCount} updated, ${deactivatedCount} deactivated`,
               reference_id: logRecord.id,
             });
           });
@@ -538,22 +731,38 @@ export function StudentImporter() {
           console.error("Error creating import notifications:", notifErr);
         }
       }
-    } catch (logErr) {
-      console.error("Error logging import:", logErr);
+
+      setProgress(100);
+
+      // Update results to final state
+      setResults({
+        inserted: insertedCount,
+        updated: updatedCount,
+        unchanged: unchangedStudents.length,
+        newEnrollments: newEnrollmentCount,
+        reactivated: reactivatedCount,
+        deactivated: deactivatedCount,
+        errors,
+        studentsToDeactivate: [],
+      });
+      setIsPreviewMode(false);
+    } catch (error) {
+      console.error("Error during import confirmation:", error);
+      errors.push({ error: error.message });
+      setResults((prev) => ({ ...prev, errors }));
     }
 
-    // Show results
-    setResults({
-      inserted: insertedCount,
-      updated: updatedCount,
-      unchanged: unchangedCount,
-      errors,
-    });
-    setShowResults(true);
-    setUploading(false);
+    setIsConfirming(false);
+    setPendingImportData(null);
     setFile(null);
     setPreviewData([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function cancelImport() {
+    setShowResults(false);
+    setPendingImportData(null);
+    setIsPreviewMode(true);
   }
 
   function downloadErrorLog() {
@@ -809,64 +1018,158 @@ export function StudentImporter() {
         </div>
       </Card>
 
-      {/* Results Modal with 3-way breakdown */}
+      {/* Results Modal with preview/confirm flow */}
       <Modal
         isOpen={showResults}
-        onClose={() => setShowResults(false)}
-        title="Import Results"
+        onClose={isPreviewMode ? cancelImport : () => setShowResults(false)}
+        title={isPreviewMode ? "Import Preview" : "Import Complete"}
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
-            {/* Inserted */}
-            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                <span className="font-semibold text-green-900 dark:text-green-100">
-                  Inserted
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                {results.inserted}
+          {/* Preview Mode Banner */}
+          {isPreviewMode && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                <AlertCircle className="w-4 h-4 inline mr-1" />
+                Review the changes below before confirming the import.
               </p>
             </div>
+          )}
 
-            {/* Updated */}
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-              <div className="flex items-center gap-2 mb-1">
-                <Edit3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span className="font-semibold text-blue-900 dark:text-blue-100">
-                  Updated
-                </span>
+          {/* Student Changes */}
+          <div>
+            <h4 className="font-medium text-slate-700 dark:text-slate-300 mb-2">
+              Student Data Changes
+            </h4>
+            <div className="grid grid-cols-3 gap-3">
+              {/* Inserted */}
+              <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                <div className="flex items-center gap-2 mb-1">
+                  <UserPlus className="w-4 h-4 text-green-600 dark:text-green-400" />
+                  <span className="text-sm font-medium text-green-900 dark:text-green-100">
+                    New
+                  </span>
+                </div>
+                <p className="text-xl font-bold text-green-600 dark:text-green-400">
+                  {results.inserted}
+                </p>
               </div>
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {results.updated}
-              </p>
-            </div>
 
-            {/* Unchanged */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-2 mb-1">
-                <RefreshCw className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  Unchanged
-                </span>
+              {/* Updated */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-2 mb-1">
+                  <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    Updated
+                  </span>
+                </div>
+                <p className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                  {results.updated}
+                </p>
               </div>
-              <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">
-                {results.unchanged}
-              </p>
+
+              {/* Unchanged */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 mb-1">
+                  <Users className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                  <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                    Unchanged
+                  </span>
+                </div>
+                <p className="text-xl font-bold text-slate-600 dark:text-slate-400">
+                  {results.unchanged}
+                </p>
+              </div>
             </div>
           </div>
 
+          {/* Enrollment Changes */}
+          {(results.newEnrollments > 0 ||
+            results.reactivated > 0 ||
+            results.deactivated > 0) && (
+            <div>
+              <h4 className="font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Semester Enrollment Changes
+              </h4>
+              <div className="grid grid-cols-3 gap-3">
+                {/* New Enrollments */}
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
+                      New Enrolled
+                    </span>
+                  </div>
+                  <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {results.newEnrollments || 0}
+                  </p>
+                </div>
+
+                {/* Reactivated */}
+                <div className="p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-xl border border-cyan-200 dark:border-cyan-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <RefreshCw className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <span className="text-sm font-medium text-cyan-900 dark:text-cyan-100">
+                      Reactivated
+                    </span>
+                  </div>
+                  <p className="text-xl font-bold text-cyan-600 dark:text-cyan-400">
+                    {results.reactivated || 0}
+                  </p>
+                </div>
+
+                {/* Deactivated */}
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <UserMinus className="w-4 h-4 text-red-600 dark:text-red-400" />
+                    <span className="text-sm font-medium text-red-900 dark:text-red-100">
+                      Deactivated
+                    </span>
+                  </div>
+                  <p className="text-xl font-bold text-red-600 dark:text-red-400">
+                    {results.deactivated || 0}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Deactivation Warning with Student List */}
+          {isPreviewMode && results.studentsToDeactivate?.length > 0 && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                <span className="font-medium text-red-900 dark:text-red-100">
+                  Students to be deactivated from this semester:
+                </span>
+              </div>
+              <div className="max-h-24 overflow-y-auto space-y-1">
+                {results.studentsToDeactivate.slice(0, 10).map((student) => (
+                  <div
+                    key={student.student_id}
+                    className="text-sm text-red-700 dark:text-red-300"
+                  >
+                    {student.student_id} - {student.full_name}
+                  </div>
+                ))}
+                {results.studentsToDeactivate.length > 10 && (
+                  <p className="text-sm text-red-600 dark:text-red-400 italic">
+                    ...and {results.studentsToDeactivate.length - 10} more
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Errors */}
           {results.errors.length > 0 && (
-            <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
+            <div className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
               <div className="flex items-center gap-2 mb-2">
-                <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                <span className="font-semibold text-orange-900 dark:text-orange-100">
+                <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                <span className="font-medium text-orange-900 dark:text-orange-100">
                   Errors: {results.errors.length}
                 </span>
               </div>
-              <div className="max-h-32 overflow-y-auto space-y-1">
+              <div className="max-h-24 overflow-y-auto space-y-1">
                 {results.errors.slice(0, 5).map((err, idx) => (
                   <div
                     key={idx}
@@ -886,7 +1189,7 @@ export function StudentImporter() {
               <Button
                 variant="outline"
                 onClick={downloadErrorLog}
-                className="mt-3 w-full flex justify-center items-center"
+                className="mt-2 w-full flex justify-center items-center text-sm"
               >
                 <Download className="w-4 h-4 mr-2" />
                 Download Error Log
@@ -894,9 +1197,31 @@ export function StudentImporter() {
             </div>
           )}
 
-          <Button onClick={() => setShowResults(false)} className="w-full">
-            Close
-          </Button>
+          {/* Action Buttons */}
+          {isPreviewMode ? (
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={cancelImport}
+                className="flex-1"
+                disabled={isConfirming}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmImport}
+                loading={isConfirming}
+                className="flex-1 flex justify-center items-center"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Confirm Import
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={() => setShowResults(false)} className="w-full">
+              Close
+            </Button>
+          )}
         </div>
       </Modal>
     </div>

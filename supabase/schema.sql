@@ -92,6 +92,7 @@ CREATE TABLE semester_enrollments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id TEXT NOT NULL REFERENCES students(student_id),
     semester_id UUID NOT NULL REFERENCES semesters(id),
+    is_active BOOLEAN NOT NULL DEFAULT true,
     enrolled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(student_id, semester_id)
 );
@@ -189,6 +190,7 @@ CREATE INDEX idx_students_name ON students(full_name);
 -- Semester Enrollments
 CREATE INDEX idx_semester_enrollments_student ON semester_enrollments(student_id);
 CREATE INDEX idx_semester_enrollments_semester ON semester_enrollments(semester_id);
+CREATE INDEX idx_semester_enrollments_active ON semester_enrollments(is_active);
 
 -- Semesters
 CREATE INDEX idx_semesters_active ON semesters(is_active);
