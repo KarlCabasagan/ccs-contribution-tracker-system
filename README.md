@@ -343,7 +343,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Made with ❤️ for CCS**
+**Made with ❤️ for bebu**
 
 [⬆ Back to Top](#-ccs-contribution-tracker)
 
